@@ -1,355 +1,159 @@
-// File: server.js - Multi-Platform Donation Server (Saweria, Sociabuzz, BagiBagi)
-// Menggunakan Roblox Open Cloud MessagingService API - Direct Send (No Queue)
+const express = require("express");
+const crypto = require("node:crypto");
+const path = require("node:path");
 
-const express = require('express');
 const app = express();
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "32kb", strict: true }));
 
-app.use(express.json());
+const PORT = Number(process.env.PORT || 3000);
+const ROBLOX_API_KEY = process.env.ROBLOX_API_KEY || "";
+const UNIVERSE_ID = process.env.UNIVERSE_ID || "";
+const MESSAGING_TOPIC = process.env.MESSAGING_TOPIC || "DonationNotif";
+const SAWERIA_WEBHOOK_SECRET = process.env.SAWERIA_WEBHOOK_SECRET || "";
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
-// ============================================
-// KONFIGURASI - SESUAIKAN DENGAN SETTING KAMU
-// ============================================
-const CONFIG = {
-    // Roblox Open Cloud API Key (buat di https://create.roblox.com/credentials)
-    // Pastikan API Key punya permission: messaging-service:publish
-    ROBLOX_API_KEY: process.env.ROBLOX_API_KEY || 'a4O+7m1c40yiBjen7Z3AC2gEFPYHSi6tiyJ5L5i3MY9MHrlyZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNkluTnBaeTB5TURJeExUQTNMVEV6VkRFNE9qVXhPalE1V2lJc0luUjVjQ0k2SWtwWFZDSjkuZXlKaGRXUWlPaUpTYjJKc2IzaEpiblJsY201aGJDSXNJbWx6Y3lJNklrTnNiM1ZrUVhWMGFHVnVkR2xqWVhScGIyNVRaWEoyYVdObElpd2lZbUZ6WlVGd2FVdGxlU0k2SW1FMFR5czNiVEZqTkRCNWFVSnFaVzQzV2pOQlF6Sm5SVVpRV1VoVGFUWjBhWGxLTlV3MWFUTk5XVGxOU0hKc2VTSXNJbTkzYm1WeVNXUWlPaUl4TURVeU9UZzRNVEU0TnlJc0ltVjRjQ0k2TVRjNU1UTXdOakkwTlN3aWFXRjBJam94TnpreE16QXlOalExTENKdVltWWlPakUzT1RFek1ESTJORFY5LmNLWTNkTWEtTG9sVFpFSDMwUUhfRHo5UnhUWG5wcEZYVXhSR0xxVVM2ZGZWY01XWW1iTHhEMWcwQ3VKNk9xLWh2OGxpOWFHX2VfRHU1NVgzTGZ4eFpFb3gwZ2pnd1FGQWVYQnpETEpOZV80MGJLSkJGdGpPX2NIVVdHcmtTWlUwZnVtN01TRVRGQ1JGQkJIU2IzWFYyT1dpWEc0WUZ6U0prcFptTF9IclRyd0hNMWVvQzVQVDYwaTU4SDNsaXhXamNpSllLVmdNVzFnT0oxbEFXTTJ5cUJYVktMdW1uQzRzd1RMXzdiVlpXSmZNWDA4ajBWLTZMcVlHLWh6bVlKb1R2WnRtTGZtR3FWVHQwRGJjTEFsRGN5UDVEeWJ1R1VUTThPNFVYLXVsZ1Y2YXVrWlU4ZnUydzZPc0JtczhyMUptV3locnBYNFgzQWFROTMxa1czZFVrQQ==',
-    
-    // Universe ID dari game kamu (bukan Place ID!)
-    UNIVERSE_ID: process.env.UNIVERSE_ID || '9349310940',
-    
-    // Topic name untuk MessagingService (harus sama dengan di Roblox script)
-    MESSAGING_TOPIC: 'DonationNotif'
-};
+app.use(express.static(path.join(__dirname, "public"), { index: false }));
 
-// ============================================
-// ROBLOX MESSAGING SERVICE API - DIRECT SEND
-// ============================================
-async function sendToRoblox(donation) {
-    const url = `https://apis.roblox.com/messaging-service/v1/universes/${CONFIG.UNIVERSE_ID}/topics/${CONFIG.MESSAGING_TOPIC}`;
-    
-    const payload = {
-        message: JSON.stringify({
-            platform: donation.platform,
-            donatorName: donation.donatorName,
-            amount: donation.amount,
-            message: donation.message,
-            timestamp: Date.now()
-        })
-    };
-    
-    console.log(`[ROBLOX] 📤 Sending to MessagingService...`);
-    console.log(`[ROBLOX] URL: ${url}`);
-    console.log(`[ROBLOX] Payload:`, JSON.stringify(payload, null, 2));
-    
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'x-api-key': CONFIG.ROBLOX_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
-        
-        if (response.ok) {
-            console.log(`[ROBLOX] ✅ SUCCESS - Sent to Roblox:`, donation.donatorName, 'Rp', donation.amount);
-            return { success: true, status: response.status };
-        } else {
-            const errorText = await response.text();
-            console.error(`[ROBLOX] ❌ FAILED - Status:`, response.status, errorText);
-            return { success: false, status: response.status, error: errorText };
-        }
-    } catch (error) {
-        console.error(`[ROBLOX] ❌ ERROR:`, error.message);
-        return { success: false, error: error.message };
-    }
+function safeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || !a || !b) return false;
+  const aa = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
-// ============================================
-// WEBHOOK: SAWERIA
-// ============================================
-app.post('/webhook/saweria', async (req, res) => {
-    console.log('\n[SAWERIA] ========== NEW DONATION ==========');
-    console.log('[SAWERIA] Raw payload:', JSON.stringify(req.body, null, 2));
-    
-    const body = req.body;
-    
-    const donatorName = 
-        body.donator_name ||
-        body.donatorName ||
-        body.name ||
-        (body.data && body.data.donator_name) ||
-        'Donatur Anonim';
-    
-    const amount = 
-        body.amount_raw ||
-        body.amount ||
-        body.gross_amount ||
-        (body.data && body.data.amount) ||
-        0;
-    
-    const message = 
-        body.message ||
-        body.note ||
-        (body.data && body.data.message) ||
-        '';
-    
-    console.log(`[SAWERIA] Parsed - Name: ${donatorName}, Amount: ${amount}, Message: ${message}`);
-    
-    if (!isNaN(amount) && amount > 0) {
-        const result = await sendToRoblox({
-            platform: 'saweria',
-            donatorName,
-            amount: Number(amount),
-            message
-        });
-        
-        res.json({ success: true, platform: 'saweria', roblox: result });
-    } else {
-        console.log('[SAWERIA] ⚠️ Invalid donation data, skipped');
-        res.json({ success: false, platform: 'saweria', error: 'Invalid amount' });
-    }
-});
+function requireAdmin(req, res, next) {
+  const supplied = req.get("x-admin-token") || "";
+  if (!ADMIN_TOKEN || !safeEqual(supplied, ADMIN_TOKEN)) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+  next();
+}
 
-// ============================================
-// WEBHOOK: SOCIABUZZ
-// ============================================
-app.post('/webhook/sociabuzz', async (req, res) => {
-    console.log('\n[SOCIABUZZ] ========== NEW DONATION ==========');
-    console.log('[SOCIABUZZ] Raw payload:', JSON.stringify(req.body, null, 2));
-    
-    const body = req.body;
-    
-    const donatorName =
-        (typeof body.supporter === 'string' && body.supporter.trim().length > 0
-            ? body.supporter.trim()
-            : null) ||
-        body.supporter_name ||
-        body.name ||
-        body.donator_name ||
-        (body.user && body.user.name) ||
-        'Donatur Anonim';
-    
-    const amount =
-        body.amount_raw ||
-        body.amount ||
-        body.amount_settled ||
-        body.total ||
-        body.nominal ||
-        0;
-    
-    const message =
-        body.message ||
-        body.note ||
-        body.comment ||
-        (body.content && body.content.title) ||
-        '';
-    
-    console.log(`[SOCIABUZZ] Parsed - Name: ${donatorName}, Amount: ${amount}, Message: ${message}`);
-    
-    if (!isNaN(amount) && amount > 0) {
-        const result = await sendToRoblox({
-            platform: 'sociabuzz',
-            donatorName,
-            amount: Number(amount),
-            message
-        });
-        
-        res.json({ success: true, platform: 'sociabuzz', roblox: result });
-    } else {
-        console.log('[SOCIABUZZ] ⚠️ Invalid donation data, skipped');
-        res.json({ success: false, platform: 'sociabuzz', error: 'Invalid amount' });
-    }
-});
+function requireSaweriaSecret(req, res, next) {
+  if (!SAWERIA_WEBHOOK_SECRET) {
+    return res.status(503).json({ success: false, error: "Webhook belum dikonfigurasi di Railway" });
+  }
+  const supplied = req.query.secret || req.get("x-webhook-secret") || "";
+  if (!safeEqual(String(supplied), SAWERIA_WEBHOOK_SECRET)) {
+    return res.status(401).json({ success: false, error: "Webhook secret tidak valid" });
+  }
+  next();
+}
 
-// ============================================
-// WEBHOOK: BAGIBAGI
-// ============================================
-app.post('/webhook/bagibagi', async (req, res) => {
-    console.log('\n[BAGIBAGI] ========== NEW DONATION ==========');
-    console.log('[BAGIBAGI] Raw payload:', JSON.stringify(req.body, null, 2));
-    
-    const body = req.body;
-    
-    const donatorName =
-        body.donor_name ||
-        body.donator_name ||
-        body.name ||
-        body.supporter_name ||
-        'Donatur Anonim';
-    
-    const amount =
-        body.amount ||
-        body.donation_amount ||
-        body.total ||
-        body.nominal ||
-        0;
-    
-    const message =
-        body.message ||
-        body.note ||
-        body.support_message ||
-        '';
-    
-    console.log(`[BAGIBAGI] Parsed - Name: ${donatorName}, Amount: ${amount}, Message: ${message}`);
-    
-    if (!isNaN(amount) && amount > 0) {
-        const result = await sendToRoblox({
-            platform: 'bagibagi',
-            donatorName,
-            amount: Number(amount),
-            message
-        });
-        
-        res.json({ success: true, platform: 'bagibagi', roblox: result });
-    } else {
-        console.log('[BAGIBAGI] ⚠️ Invalid donation data, skipped');
-        res.json({ success: false, platform: 'bagibagi', error: 'Invalid amount' });
-    }
-});
+function firstValue(...values) {
+  return values.find(v => v !== undefined && v !== null && String(v).trim() !== "");
+}
 
-// ============================================
-// WEBHOOK: UNIVERSAL (Auto-detect platform)
-// ============================================
-app.post('/webhook', async (req, res) => {
-    console.log('\n[UNIVERSAL] ========== NEW DONATION ==========');
-    console.log('[UNIVERSAL] Raw payload:', JSON.stringify(req.body, null, 2));
-    
-    const body = req.body;
-    
-    // Auto-detect platform
-    let platform = 'unknown';
-    if (body.donator_name || (body.data && body.data.donator_name)) {
-        platform = 'saweria';
-    } else if (body.supporter || body.supporter_name || body.amount_settled) {
-        platform = 'sociabuzz';
-    } else if (body.donor_name || body.support_message) {
-        platform = 'bagibagi';
-    }
-    
-    // Parse universal
-    const donatorName =
-        body.supporter ||
-        body.supporter_name ||
-        body.donator_name ||
-        body.donor_name ||
-        body.name ||
-        (body.user && body.user.name) ||
-        (body.data && body.data.donator_name) ||
-        'Donatur Anonim';
-    
-    const amount =
-        body.amount_raw ||
-        body.amount ||
-        body.amount_settled ||
-        body.gross_amount ||
-        body.donation_amount ||
-        body.total ||
-        body.nominal ||
-        (body.data && body.data.amount) ||
-        0;
-    
-    const message =
-        body.message ||
-        body.note ||
-        body.comment ||
-        body.support_message ||
-        (body.content && body.content.title) ||
-        (body.data && body.data.message) ||
-        '';
-    
-    console.log(`[UNIVERSAL] Detected: ${platform} - Name: ${donatorName}, Amount: ${amount}, Message: ${message}`);
-    
-    if (!isNaN(amount) && amount > 0) {
-        const result = await sendToRoblox({
-            platform,
-            donatorName: String(donatorName).trim(),
-            amount: Number(amount),
-            message: String(message)
-        });
-        
-        res.json({ success: true, platform, roblox: result });
-    } else {
-        console.log('[UNIVERSAL] ⚠️ Invalid donation data, skipped');
-        res.json({ success: false, platform, error: 'Invalid amount' });
-    }
-});
+function parseAmount(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value !== "string") return 0;
+  const normalized = value.replace(/[^0-9.,-]/g, "").replace(/[.,](?=\d{3}(?:\D|$))/g, "").replace(",", ".");
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
 
-// ============================================
-// TEST ENDPOINT - Untuk testing manual
-// ============================================
-app.post('/test', async (req, res) => {
-    console.log('\n[TEST] ========== TEST DONATION ==========');
-    
-    const { donatorName, amount, message, platform } = req.body;
-    
-    const result = await sendToRoblox({
-        platform: platform || 'test',
-        donatorName: donatorName || 'Test User',
-        amount: Number(amount) || 10000,
-        message: message || 'Test donation'
+function normalizeDonation(body, platform = "saweria") {
+  const data = body && typeof body.data === "object" && body.data ? body.data : {};
+  const donor = firstValue(body.donator_name, body.donatorName, body.donor_name, body.supporter_name, body.supporter, body.name, data.donator_name, data.name, "Donatur Anonim");
+  const rawAmount = firstValue(body.amount_raw, body.amount, body.gross_amount, body.donation_amount, body.amount_settled, body.total, body.nominal, data.amount, 0);
+  const message = firstValue(body.message, body.note, body.comment, body.support_message, data.message, "");
+  return {
+    platform,
+    donatorName: String(donor).trim().slice(0, 80) || "Donatur Anonim",
+    amount: parseAmount(rawAmount),
+    message: String(message).trim().slice(0, 300),
+    timestamp: new Date().toISOString()
+  };
+}
+
+async function sendToRoblox(donation) {
+  if (!ROBLOX_API_KEY || !UNIVERSE_ID) {
+    return { success: false, status: 503, error: "ROBLOX_API_KEY atau UNIVERSE_ID belum diatur di Railway" };
+  }
+
+  const url = `https://apis.roblox.com/messaging-service/v1/universes/${encodeURIComponent(UNIVERSE_ID)}/topics/${encodeURIComponent(MESSAGING_TOPIC)}`;
+  const message = JSON.stringify({
+    platform: donation.platform,
+    donatorName: donation.donatorName,
+    amount: donation.amount,
+    message: donation.message,
+    timestamp: donation.timestamp
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "x-api-key": ROBLOX_API_KEY,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(10000)
     });
-    
-    res.json({ success: true, platform: 'test', roblox: result });
+    const responseText = await response.text();
+    if (!response.ok) {
+      console.error("[Roblox] MessagingService rejected request:", response.status, responseText.slice(0, 500));
+      return { success: false, status: response.status, error: "Roblox menolak pesan. Periksa API key, permission, Universe ID, dan konfigurasi experience." };
+    }
+    console.log("[Roblox] Donation published:", donation.platform, donation.amount);
+    return { success: true, status: response.status };
+  } catch (error) {
+    console.error("[Roblox] Request failed:", error.message);
+    return { success: false, status: 502, error: "Tidak dapat menghubungi Roblox API" };
+  }
+}
+
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ============================================
-// STATUS ENDPOINTS
-// ============================================
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        platforms: ['saweria', 'sociabuzz', 'bagibagi'],
-        mode: 'direct-send (no queue)'
-    });
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    service: "DONATION- Roblox Bridge",
+    timestamp: new Date().toISOString(),
+    configured: {
+      robloxApiKey: Boolean(ROBLOX_API_KEY),
+      universeId: Boolean(UNIVERSE_ID),
+      saweriaWebhookSecret: Boolean(SAWERIA_WEBHOOK_SECRET),
+      adminToken: Boolean(ADMIN_TOKEN)
+    },
+    topic: MESSAGING_TOPIC
+  });
 });
 
-app.get('/', (req, res) => {
-    res.json({
-        name: 'Multi-Platform Donation Server',
-        version: '2.1.0',
-        description: 'Saweria, Sociabuzz, BagiBagi → Roblox MessagingService (Direct Send)',
-        endpoints: {
-            webhooks: {
-                saweria: 'POST /webhook/saweria',
-                sociabuzz: 'POST /webhook/sociabuzz',
-                bagibagi: 'POST /webhook/bagibagi',
-                universal: 'POST /webhook (auto-detect)'
-            },
-            test: 'POST /test',
-            health: 'GET /health'
-        },
-        config: {
-            topic: CONFIG.MESSAGING_TOPIC,
-            universeId: CONFIG.UNIVERSE_ID
-        }
-    });
+app.get("/api/status", (_req, res) => {
+  res.json({ service: "DONATION- Roblox Bridge", platforms: ["saweria"], webhookPath: "/webhook/saweria", testPath: "/api/test", healthPath: "/health" });
 });
 
-// ============================================
-// START SERVER
-// ============================================
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log('');
-    console.log('🚀 ===============================================');
-    console.log('🚀 Multi-Platform Donation Server v2.1');
-    console.log('🚀 Mode: Direct Send (No Queue)');
-    console.log('🚀 ===============================================');
-    console.log(`📡 Server running on port ${PORT}`);
-    console.log('');
-    console.log('📋 Webhook Endpoints:');
-    console.log('   • Saweria:    POST /webhook/saweria');
-    console.log('   • Sociabuzz:  POST /webhook/sociabuzz');
-    console.log('   • BagiBagi:   POST /webhook/bagibagi');
-    console.log('   • Universal:  POST /webhook');
-    console.log('   • Test:       POST /test');
-    console.log('');
-    console.log('🎮 Roblox MessagingService:');
-    console.log(`   • Topic: ${CONFIG.MESSAGING_TOPIC}`);
-    console.log(`   • Universe ID: ${CONFIG.UNIVERSE_ID}`);
-    console.log('');
-    console.log('✅ Ready to receive donations!');
-    console.log('🚀 ===============================================');
+app.post("/webhook/saweria", requireSaweriaSecret, async (req, res) => {
+  const donation = normalizeDonation(req.body || {}, "saweria");
+  if (!(donation.amount > 0)) {
+    return res.status(400).json({ success: false, error: "Nominal donasi tidak valid" });
+  }
+
+  console.log("[Saweria] Webhook received:", { donor: donation.donatorName, amount: donation.amount });
+  const roblox = await sendToRoblox(donation);
+  if (!roblox.success) return res.status(502).json({ success: false, platform: "saweria", roblox });
+  return res.json({ success: true, platform: "saweria", roblox });
+});
+
+app.post("/api/test", requireAdmin, async (req, res) => {
+  const donation = normalizeDonation(req.body || {}, "test");
+  if (!(donation.amount > 0)) return res.status(400).json({ success: false, error: "Nominal harus lebih besar dari 0" });
+  const roblox = await sendToRoblox(donation);
+  return res.status(roblox.success ? 200 : 502).json({ success: roblox.success, platform: "test", roblox });
+});
+
+app.use((err, _req, res, _next) => {
+  if (err instanceof SyntaxError && "body" in err) return res.status(400).json({ success: false, error: "JSON request tidak valid" });
+  console.error("[Server] Error:", err.message);
+  res.status(500).json({ success: false, error: "Internal server error" });
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`DONATION- bridge listening on port ${PORT}`);
+  console.log(`Roblox topic: ${MESSAGING_TOPIC}`);
 });
