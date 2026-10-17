@@ -51,8 +51,8 @@ function parseAmount(value) {
 function normalizeDonation(body, platform = "saweria") {
   const data = body && typeof body.data === "object" && body.data ? body.data : {};
   const donor = firstValue(
-    body.donator_name, body.donatorName, body.donor_name, body.supporter_name,
-    body.supporter, body.name, data.donator_name, data.name, "Donatur Anonim"
+    body.donator_name, body.donatorName, body.donor_name, body.donorName,
+    body.supporter_name, body.supporter, body.name, data.donator_name, data.name, "Donatur Anonim"
   );
   const rawAmount = firstValue(
     body.amount_raw, body.amount, body.gross_amount, body.donation_amount,
@@ -108,9 +108,7 @@ async function sendToOpenCloud(donation) {
   } catch (e) {}
 }
 
-// ============================================
-// 1. ENDPOINT PULL ROBLOX (CenzDonateRealRuntime)
-// ============================================
+// 1. ENDPOINT PULL ROBLOX
 app.post("/api/pull", (req, res) => {
   const serverId = req.body.serverId || req.headers["user-agent"] || "roblox-server";
   const limit = Math.min(Math.max(Number(req.body.limit) || 10, 1), 25);
@@ -147,16 +145,10 @@ app.post("/api/pull", (req, res) => {
     createdAt: item.timestamp
   }));
 
-  if (items.length > 0) {
-    console.log(`[ROBLOX] Mengirim ${items.length} donasi ke ${serverId}`);
-  }
-
   res.json({ ok: true, items, count: items.length, serverTime: Date.now() });
 });
 
-// ============================================
 // 2. ENDPOINT ACK ROBLOX
-// ============================================
 app.post("/api/ack", (req, res) => {
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   for (const ackItem of items) {
@@ -168,9 +160,7 @@ app.post("/api/ack", (req, res) => {
   res.json({ ok: true, acknowledged: items.length });
 });
 
-// ============================================
-// 3. WEBHOOKS (SAWERIA, SOCIABUZZ, BAGIBAGI)
-// ============================================
+// 3. WEBHOOKS SAWERIA
 app.post(["/webhook/saweria", "/webhook"], async (req, res) => {
   const donation = normalizeDonation(req.body || {}, "saweria");
   if (!(donation.amount > 0)) {
@@ -194,35 +184,57 @@ app.post("/webhook/bagibagi", (req, res) => {
   res.json({ success: true, ok: true });
 });
 
-// ============================================
-// 4. TEST ENDPOINT (Bisa dites kapan saja tanpa token)
-// ============================================
-app.post(["/test", "/api/test"], (req, res) => {
-  const donation = normalizeDonation(req.body || {}, "test");
+// 4. TEST ENDPOINT - BISA DI-KLIK LANGSUNG DI BROWSER (GET & POST)
+function processTest(req, res) {
+  const combined = { ...req.query, ...req.body };
+  const donation = normalizeDonation(combined, "test");
   if (!(donation.amount > 0)) donation.amount = 50000;
-  if (!donation.donatorName || donation.donatorName === "Donatur Anonim") donation.donatorName = "Sultan Testing";
-  if (!donation.message) donation.message = "Halo dari Railway test!";
+  if (!donation.donatorName || donation.donatorName === "Donatur Anonim") {
+    donation.donatorName = combined.name || "Sultan Testing";
+  }
+  if (!donation.message) {
+    donation.message = "Semangat live @Player!";
+  }
 
   enqueueDonation(donation);
   sendToOpenCloud(donation).catch(() => {});
 
-  res.json({
-    success: true,
-    ok: true,
-    message: "Donasi berhasil masuk ke antrean Roblox!",
-    donation
-  });
-});
+  // Tampilan HTML langsung di Browser
+  return res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Donasi Masuk ke Roblox!</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { font-family: sans-serif; background: #0c0f1d; color: #fff; padding: 30px; text-align: center; }
+        .card { max-width: 480px; margin: 20px auto; background: #151b2e; border: 2px solid #22c55e; border-radius: 16px; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+        .nominal { font-size: 36px; font-weight: 900; color: #fbbf24; margin: 10px 0; }
+        .msg { background: #0c0f1d; padding: 12px; border-radius: 8px; color: #94a3b8; font-style: italic; margin: 15px 0; }
+        .btn { display: inline-block; background: #f59e0b; color: #000; padding: 14px 28px; border-radius: 8px; font-weight: bold; text-decoration: none; font-size: 16px; border: 0; cursor: pointer; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div style="background:#22c55e20;color:#22c55e;padding:6px 14px;border-radius:20px;display:inline-block;font-weight:bold;font-size:12px;">BERHASIL DIKIRIM KE ROBLOX!</div>
+        <h2 style="margin:15px 0 5px;">Donatur: ${donation.donatorName}</h2>
+        <div class="nominal">Rp ${donation.amount.toLocaleString("id-ID")}</div>
+        <div class="msg">"${donation.message}"</div>
+        <p style="color:#4ade80;">Roblox Studio akan menarik donasi ini dalam 1-3 detik!</p>
+        <button class="btn" onclick="location.reload()">Kirim Donasi Tes Lagi 🚀</button>
+      </div>
+      <p style="color:#64748b;font-size:13px;">Status Roblox: <strong>${lastRobloxPoll ? "Terhubung" : "Menunggu Game..."}</strong></p>
+    </body>
+    </html>
+  `);
+}
+
+app.get(["/test", "/api/test"], processTest);
+app.post(["/test", "/api/test"], processTest);
 
 app.get(["/", "/health"], (req, res) => {
-  res.json({
-    status: "ok",
-    service: "DONATION- Roblox Bridge",
-    pendingInQueue: queue.length,
-    lastRobloxPoll,
-    lastRobloxServerId,
-    timestamp: new Date().toISOString()
-  });
+  res.redirect("/test");
 });
 
 app.listen(PORT, "0.0.0.0", () => {
